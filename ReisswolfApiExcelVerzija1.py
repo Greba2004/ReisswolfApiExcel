@@ -9,9 +9,9 @@ from tkcalendar import DateEntry
 from requests.auth import HTTPBasicAuth
 
 # ---- API pristup ----
-subdomain = "rwrs"
-username = "ALEKSA"
-password = "AleksaRW1234"
+subdomain = "<TVOJ_SUBDOMEN>"
+username = "TVOJ_USERNAME"
+password = "TVOJ_PASSWORD"
 
 # ---- Podrazumevani folder ----
 base_folder = Path(os.path.expanduser("~")) / "Desktop" / "RADNI_NALOZI"
@@ -41,7 +41,6 @@ def choose_folder():
     if folder:
         selected_folder = Path(folder)
         folder_label.config(text=str(selected_folder))
-        # sačuvaj u konfiguracioni fajl
         try:
             with open(config_file, "w") as f:
                 json.dump({"last_folder": str(selected_folder)}, f)
@@ -52,6 +51,11 @@ def format_dt(dt):
     if isinstance(dt, str):
         return dt[:16].replace("T", " ")
     return dt
+
+def format_address(addr):
+    if not addr:
+        return ""
+    return f"{addr.get('extension','')}, {addr.get('number','')}, {addr.get('street','')}, {addr.get('city','')}"
 
 def fetch_orders_for_date(date_obj, ws, existing_ids):
     """Preuzima naloge za jedan dan i dodaje u dati worksheet"""
@@ -78,7 +82,8 @@ def fetch_orders_for_date(date_obj, ws, existing_ids):
             continue
 
         account = order.get("account", {})
-        account_str = f"{account.get('name','')} ({account.get('acronym','')})"
+        account_name = account.get('name', '')
+        account_acronym = account.get('acronym', '')
 
         barcode = order.get("barcode", {}).get("value", "")
         date_created = format_dt(order.get("dateCreated"))
@@ -86,18 +91,20 @@ def fetch_orders_for_date(date_obj, ws, existing_ids):
         status = order.get("status", "")
         service_level_name = order.get("serviceLevelName", "")
         additional_info = order.get("additionalInfo") if status == "CANCELLED" else ""
-        pickup = order.get("pickupAddress", {})
-        pickup_info = f"{pickup.get('extension','')}, {pickup.get('number','')}, {pickup.get('city','')}"
+        pickup_info = format_address(order.get("pickupAddress"))
+        delivered_info = format_address(order.get("deliveryAddress"))
 
         row = [
-            account_str,
+            account_name,
+            account_acronym,
             barcode,
             date_created,
             orderer,
             status,
             service_level_name,
             additional_info,
-            pickup_info
+            pickup_info,
+            delivered_info
         ]
 
         ws.append(row)
@@ -107,7 +114,6 @@ def fetch_orders_for_date(date_obj, ws, existing_ids):
     return new_orders_count
 
 def get_unique_excel_path(base_path):
-    """Ako postoji fajl sa istim imenom, dodaje _1, _2, ..."""
     counter = 1
     path = base_path
     while path.exists():
@@ -127,8 +133,18 @@ def run_export():
     base_excel_path = selected_folder / f"Orders_{d_from}_{d_to}.xlsx"
     excel_path = get_unique_excel_path(base_excel_path)
 
-    headers = ["account", "barcode", "dateCreated", "orderer", 
-               "status", "serviceLevelName", "additionalInfo", "pickupAddress"]
+    headers = [
+        "accountName",
+        "accountAcronym",
+        "barcode",
+        "dateCreated",
+        "orderer",
+        "status",
+        "serviceLevelName",
+        "additionalInfo",
+        "pickupAddress",
+        "deliveredAddress"
+    ]
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -139,7 +155,7 @@ def run_export():
     total_orders = 0
     current = d_from
     while current <= d_to:
-        if current.weekday() < 5:  # preskoči subotu(5) i nedelju(6)
+        if current.weekday() < 5:  # preskoči subotu i nedelju
             new_count = fetch_orders_for_date(current, ws, existing_ids)
             total_orders += new_count
         current += timedelta(days=1)
